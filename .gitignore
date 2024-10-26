@@ -1,0 +1,7 @@
+*.stm
+.filelist.txt
+data/maps/test.filelist.txt
+*.vpj
+*.vpw
+*.vpwhistxml
+*.vtg
