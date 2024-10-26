@@ -14,9 +14,9 @@ PLAYER_FRICTION = $00E0   ; 8.8 here
 ; Player Acceleration constants
 
 ACCEL_X  = $0030 	;$0030    ; 8.8 fixed point, if max speed is 2.0, then lets spend 16 frames getting there
-ACCEL_Y  = $0030
+ACCEL_Y  = 0 ; $0030
 
-JUMP_VEL = $0800
+JUMP_VEL = $0300
 
 GRAVITY = $0029       ; 9.8/60 ; 8.8 FIXED POINT
 
@@ -252,10 +252,12 @@ start
 
 		lda #1
 		sta p1_is_falling
+		stz p1_is_grounded
 
-		ldax #anim_def_idle
+		;ldax #anim_def_idle
 		;ldax #anim_def_walk
 		;ldax #anim_def_run
+		ldax #anim_def_jump
 		jsr  AnimSetAX
 
 ;;-----------------------------------------------------------------------------
@@ -316,6 +318,22 @@ VIRQ = $FFFE
 		lda #2
 		sta io_ctrl
 ;------------------------------------------------------------------------------
+
+		ldx #1
+		ldy #1
+		jsr TermSetXY
+
+		lda p1_is_grounded
+		jsr TermPrintAH
+
+		jsr TermCR
+
+		ldax p1_vx
+		jsr TermPrintAXH
+
+		jsr TermCR
+		ldax p1_vy
+		jsr TermPrintAXH
 
 		bra ]main_loop
 
@@ -669,6 +687,84 @@ GameControls
 		jsr ReadHardware
 		jsr MovePlayerControls
 
+		lda p1_dpad_input_down
+		asl
+		asl
+		asl
+		asl
+		ora p1_dpad_input_down+1
+		bit #>SNES_A.SNES_X		; checks AXYB
+		beq :no_jump
+
+		; jump
+		sec
+		lda p1_vy
+		sbc #JUMP_VEL
+		sta p1_vy
+		lda p1_vy+1
+		sbc #>JUMP_VEL
+		sta p1_vy+1
+
+		stz p1_is_grounded
+		lda #1
+		sta p1_is_falling
+
+		ldax #anim_def_jump
+		jsr AnimSetAX
+
+:no_jump
+
+;------------------------------------------------------------------------------
+;
+; These seems like a reasonable place to look at what the player is doing
+; and set the proper animation
+;
+		lda p1_is_falling
+		beq :not_falling
+
+		; based on the players VY choose an appropriate frame
+		ldx #sp_frames_jump  ; up
+		lda p1_vy+1
+		bmi :going_up
+		ldx #sp_frames_jump_peak ; top of the world
+		cmp #2
+		bcc :going_up
+		ldx #sp_frames_jump_fall
+:going_up
+		stx anim_sprite_frame
+		rts
+
+:not_falling
+
+		lda p1_vx+1
+		bpl :is_plus
+		eor #$ff
+		inc
+:is_plus
+		cmp #1
+		bcc :set_idle
+
+		; for the run anim, we need a velocity, and we need a direction input
+		lda p1_dpad_input_raw
+		and #SNES_LEFT.SNES_RIGHT
+		beq :set_idle
+
+		ldax #anim_def_run
+		bra :set_anim
+
+:set_idle
+		ldax #anim_def_idle
+:set_anim
+		cmpax pAnim
+		beq :skipset
+		jsr AnimSetAX
+:skipset
+		rts
+
+
+
+
+
 		do 0
 		lda frisbee_state
 		bne :not_p1
@@ -857,7 +953,7 @@ MovePlayerControls
 		; Up, Down, Left, Right respectively
 
 		lda p1_is_falling
-		bne :on_ground
+		bne :is_falling
 
 		; These accelerations do not apply, unless we are on the ground
 
@@ -883,7 +979,7 @@ MovePlayerControls
 		;adc p1_y+2
 		;sta p1_y+2
 
-:on_ground
+:is_falling
 		tya
 		and #$3
 		tax
@@ -1424,6 +1520,9 @@ MoveFrisbee
 :p1_vx_ext = temp1+2
 :p1_vy_ext = temp1+3
 
+:old_attr = temp2
+:new_attr = temp2+2
+
 ; sign extension for vx and vy, for math below
 		stz <:p1_vx_ext
 		stz <:p1_vy_ext
@@ -1503,6 +1602,8 @@ MoveFrisbee
 ;
 ; vy = vy + gravity
 
+		lda p1_is_grounded
+		bne :no_gravity
 		clc
 		lda #GRAVITY
 		adc <p1_vy
@@ -1510,6 +1611,8 @@ MoveFrisbee
 		lda #0
 		adc <p1_vy+1
 		sta <p1_vy+1
+
+:no_gravity
 
 ; Velocity Clamps - player is not allowed to exceed 15 units per frame
 ; (which is something like 1050 pixels per second / over 3 screens per second horizontal
@@ -1571,16 +1674,18 @@ MoveFrisbee
 ; If we're in the same tile as before, and we're not on the ground, then it's
 ; like there's no collision
 
-		lda p1_is_falling
-		beq :not_falling1
-
 		lda :y_tile
 		cmp :oldy_tile
+		bne :not_same_tile
 
+		lda :x_tile
+		cmp :oldx_tile
+		bne :not_same_tile
 
+		; we didn't move out of our tile
+		jmp :nothing_to_do
 
-
-:not_falling1
+:not_same_tile
 
 :pRowOld = temp2
 :pRowNow = temp2+2
@@ -1593,17 +1698,62 @@ MoveFrisbee
 		jsr GetRowAddr
 		stax :pRowOld
 
+		lda :oldx_tile
+		asl
+		tay
+		lda (:pRowOld),y
+		sta :old_attr
+
 		lda :x_tile
 		asl
 		tay
 		lda (:pRowNow),y
+		sta :new_attr
+		beq :nothing_to_do
+;----
+		cmp :old_attr
 		beq :nothing_to_do
 
+		lda :x_tile
+		cmp :oldx_tile
+		beq :check_ytile ; :no_x_worry
+;------------------------------------------------------------------------------
+		lda p1_vx+1
+		stz p1_vx      	; no flags affected
+		stz p1_vx+1
+		bpl :right      ; player is going right
+		; since the player is going left, clamp us back on the left side of the tile to our right
+		lda p1_x+1
+		ora #$0F
+		inc
+		sta p1_x+1
+		bne :x_is_good
+		inc p1_x+2
+		bra :x_is_good
+
+:right
+		; since the player is going right, clamp the x back to just outside our current tile, left
+		lda p1_x+1
+		and #$F0
+		dec
+		sta p1_x+1
+		bne :x_is_good
+		dec p1_x+2
+:x_is_good
+
+:check_ytile
+		lda :y_tile
+		cmp :oldy_tile
+		beq :nothing_to_do
+
+:no_x_worry
 		; We only have one kind of tile, and at the moment we only have
 		; 1 kind of velocity
 		stz p1_vy
 		stz p1_vy+1		   ; you hit stuff, so slow down
 		stz p1_is_falling  ; you're also not falling
+		lda #1
+		sta p1_is_grounded
 
 		; up you go big guy - to the top of our tile, in fact into the tile
 		; above us, bye
@@ -1618,7 +1768,7 @@ MoveFrisbee
 :nothing_to_do
 
 		lda p1_is_falling
-		bne :isfalling
+		bne :isfalling     ; we don't want to stop falling in middle of our jump
 
 		; player is on the ground, he needs friction
 		ldax p1_vx
