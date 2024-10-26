@@ -2414,7 +2414,7 @@ init320x200
 		; sky map 2
 		; TBD, I need to add this
 		lda #$01  ; enabled + 16x16
-		stz VKY_TM2_CTRL
+		sta VKY_TM2_CTRL
 
 		ldaxy #MAP_DATA2
 		staxy VKY_TM2_ADDR_L
@@ -2427,9 +2427,10 @@ init320x200
 		sta VKY_TM2_SIZE_Y
 		stz VKY_TM2_SIZE_Y+1
 
-		stz VKY_TM2_POS_X_L  ; scroll x lo
+		lda #16
+		sta VKY_TM2_POS_X_L  ; scroll x lo
 		stz VKY_TM2_POS_X_H  ; scroll x hi
-		stz VKY_TM2_POS_Y_L  ; scroll y
+		sta VKY_TM2_POS_Y_L  ; scroll y
 		stz VKY_TM2_POS_Y_H  ; scroll y
 
 		; bitmap disables
@@ -2460,11 +2461,14 @@ init320x200
 		staxy VKY_TS4_ADDR_L
 		staxy VKY_TS5_ADDR_L
 		staxy VKY_TS6_ADDR_L
-		staxy VKY_TS7_ADDR_L
 		stz VKY_TS4_ADDR_H+1
 		stz VKY_TS5_ADDR_H+1
 		stz VKY_TS6_ADDR_H+1
-		stz VKY_TS7_ADDR_H+1
+
+		; This is our sky
+		ldaxy #TILE_DATA7
+		staxy VKY_TS7_ADDR_L
+		stz VKY_TS7_ADDR_H+1	; so not square
 
 ;------------------------------------------------------------------------------
 ;
@@ -2543,6 +2547,73 @@ init320x200
 		jsr set_read_address
 
 		jsr decompress_pixels
+
+;------- Get the background sky displayed
+
+		ldaxy #CLUT_DATA
+		jsr set_write_address
+		ldaxy #img_clouds
+		jsr set_read_address
+
+		jsr decompress_clut
+
+		; set access to vicky CLUTS
+		lda #1
+		sta io_ctrl
+
+		; copy the clut up there
+		; clut 3 for our friendly map
+		ldx #0
+]lp		lda CLUT_DATA,x
+		sta VKY_GR_CLUT_3,x
+		lda CLUT_DATA+$100,x
+		sta VKY_GR_CLUT_3+$100,x
+		lda CLUT_DATA+$200,x
+		sta VKY_GR_CLUT_3+$200,x
+		lda CLUT_DATA+$300,x
+		sta VKY_GR_CLUT_3+$300,x
+		dex
+		bne ]lp
+
+		stz io_ctrl
+
+; Get the sky tiles
+
+		ldaxy #SKY_CHAR
+		jsr set_write_address
+		ldaxy #img_clouds
+		jsr set_read_address
+
+		jsr decompress_pixels
+
+; Get the sky map
+
+		ldaxy #SKY_MAP
+		jsr set_write_address
+		ldaxy #img_clouds
+		jsr set_read_address
+		jsr decompress_map
+
+		; when we finish here, the write MMU is going to be pointed at our map
+		; we need to massage for CLUT3
+:pMap   = temp0
+
+]TATR   = $1F ;  CLUT3, Set 7
+		ldax #WRITE_BLOCK
+		stax :pMap
+
+		ldx #$20  ; page counter
+		ldy #$1
+]lp		lda (:pMap),y
+		ora #]TATR
+		sta (:pMap),y
+		iny
+		iny
+		cpy #$1
+		bne ]lp
+		inc :pMap+1
+		dex
+		bne ]lp
 
 
 ;------- disable the sprites, for the moment
@@ -2660,7 +2731,7 @@ init320x200
 
 ;------------------------------------------------------------------------------
 
-txt_platform asc 'PLATFORM SAMPLE',00
+txt_platform asc 'SPOOKY RUN',00
 ;txt_help2	asc 'KEEP THE DISC FROM PASSING BY',00
 ;txt_button_down asc 'BUTTON DOWN',0D,00
 ;txt_button_up asc 'BUTTON UP',0D,00
