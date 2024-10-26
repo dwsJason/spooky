@@ -5,3 +5,7 @@ data/maps/test.filelist.txt
 *.vpw
 *.vpwhistxml
 *.vtg
+_FileInformation.txt
+foenixmgr.ini
+spooky.lst
+spooky.pgz_Output.txt
