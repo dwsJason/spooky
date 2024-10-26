@@ -54,7 +54,7 @@ main_code_end
 		org $0
 		adr image1_start
 		adr image1_end-image1_start  ; labels only work here, if data below is less than 64K
-		org $070000
+		org $060000
 image1_start
 
 img_court	  putbin data\maps\test.256
@@ -74,6 +74,15 @@ sprite_walk   putbin data\sprites\walk.256  	  ; 8
 sprite_walkl  putbin data\sprites\walk_flip.256   ; 8
 
 image1_end
+
+		org $0
+		adr image2_start
+		adr image2_end-image2_start  ; labels only work here, if data below is less than 64K
+		org $070000
+image2_start
+img_clouds    putbin data\clouds.256
+image2_end
+
 
 ;------------------------------------------------------------------------------
 
