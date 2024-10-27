@@ -14,9 +14,9 @@ PLAYER_FRICTION = $00E0   ; 8.8 here
 ; Player Acceleration constants
 
 ACCEL_X  = $0030 	;$0030    ; 8.8 fixed point, if max speed is 2.0, then lets spend 16 frames getting there
-ACCEL_Y  = $0030
+ACCEL_Y  = 0 ; $0030
 
-JUMP_VEL = $0800
+JUMP_VEL = $0320
 
 GRAVITY = $0029       ; 9.8/60 ; 8.8 FIXED POINT
 
@@ -87,6 +87,7 @@ p1_vy ds 2
 
 p1_is_falling  ds 1
 p1_is_grounded ds 1
+p1_is_jump     ds 1
 
 pAnim ds 2 ; pointer to the current animation sequence 
 anim_index ds 1
@@ -252,10 +253,12 @@ start
 
 		lda #1
 		sta p1_is_falling
+		stz p1_is_grounded
 
-		ldax #anim_def_idle
+		;ldax #anim_def_idle
 		;ldax #anim_def_walk
 		;ldax #anim_def_run
+		ldax #anim_def_jump
 		jsr  AnimSetAX
 
 ;;-----------------------------------------------------------------------------
@@ -316,6 +319,22 @@ VIRQ = $FFFE
 		lda #2
 		sta io_ctrl
 ;------------------------------------------------------------------------------
+
+		ldx #1
+		ldy #1
+		jsr TermSetXY
+
+		lda p1_is_grounded
+		jsr TermPrintAH
+
+		jsr TermCR
+
+		ldax p1_vx
+		jsr TermPrintAXH
+
+		jsr TermCR
+		ldax p1_vy
+		jsr TermPrintAXH
 
 		bra ]main_loop
 
@@ -669,6 +688,96 @@ GameControls
 		jsr ReadHardware
 		jsr MovePlayerControls
 
+		lda p1_dpad_input_down
+		asl
+		asl
+		asl
+		asl
+		ora p1_dpad_input_down+1
+		bit #>SNES_A.SNES_X		; checks AXYB
+		beq :no_jump
+
+		lda p1_is_jump			; for the double jump
+		cmp #2
+		bcs :no_jump
+		inc
+		sta p1_is_jump
+
+		; jump
+		;sec
+		;lda p1_vy
+		;sbc #JUMP_VEL
+		;sta p1_vy
+		;lda p1_vy+1
+		;sbc #>JUMP_VEL
+		;sta p1_vy+1
+
+		; This feels better for double jump
+		lda #0-JUMP_VEL
+		sta p1_vy
+		lda #>0-JUMP_VEL
+		sta p1_vy+1
+
+		stz p1_is_grounded
+		lda #1
+		sta p1_is_falling
+
+		ldax #anim_def_jump
+		jsr AnimSetAX
+
+:no_jump
+
+;------------------------------------------------------------------------------
+;
+; These seems like a reasonable place to look at what the player is doing
+; and set the proper animation
+;
+		lda p1_is_falling
+		beq :not_falling
+
+		; based on the players VY choose an appropriate frame
+		ldx #sp_frames_jump  ; up
+		lda p1_vy+1
+		bmi :going_up
+		ldx #sp_frames_jump_peak ; top of the world
+		cmp #2
+		bcc :going_up
+		ldx #sp_frames_jump_fall
+:going_up
+		stx anim_sprite_frame
+		rts
+
+:not_falling
+
+		lda p1_vx+1
+		bpl :is_plus
+		eor #$ff
+		inc
+:is_plus
+		cmp #1
+		bcc :set_idle
+
+		; for the run anim, we need a velocity, and we need a direction input
+		lda p1_dpad_input_raw
+		and #SNES_LEFT.SNES_RIGHT
+		beq :set_idle
+
+		ldax #anim_def_run
+		bra :set_anim
+
+:set_idle
+		ldax #anim_def_idle
+:set_anim
+		cmpax pAnim
+		beq :skipset
+		jsr AnimSetAX
+:skipset
+		rts
+
+
+
+
+
 		do 0
 		lda frisbee_state
 		bne :not_p1
@@ -856,8 +965,9 @@ MovePlayerControls
 		; these load 4 bits
 		; Up, Down, Left, Right respectively
 
-		lda p1_is_falling
-		bne :on_ground
+		; removed this, because it's more fun to control the player while falling
+		;lda p1_is_falling
+		;bne :is_falling
 
 		; These accelerations do not apply, unless we are on the ground
 
@@ -883,7 +993,7 @@ MovePlayerControls
 		;adc p1_y+2
 		;sta p1_y+2
 
-:on_ground
+:is_falling
 		tya
 		and #$3
 		tax
@@ -1424,6 +1534,13 @@ MoveFrisbee
 :p1_vx_ext = temp1+2
 :p1_vy_ext = temp1+3
 
+:old_attr = temp3
+:new_attr = temp3+1
+
+:pRowOld = temp2
+:pRowNow = temp2+2
+
+
 ; sign extension for vx and vy, for math below
 		stz <:p1_vx_ext
 		stz <:p1_vy_ext
@@ -1503,6 +1620,8 @@ MoveFrisbee
 ;
 ; vy = vy + gravity
 
+		lda p1_is_grounded
+		bne :no_gravity
 		clc
 		lda #GRAVITY
 		adc <p1_vy
@@ -1510,6 +1629,8 @@ MoveFrisbee
 		lda #0
 		adc <p1_vy+1
 		sta <p1_vy+1
+
+:no_gravity
 
 ; Velocity Clamps - player is not allowed to exceed 15 units per frame
 ; (which is something like 1050 pixels per second / over 3 screens per second horizontal
@@ -1571,19 +1692,18 @@ MoveFrisbee
 ; If we're in the same tile as before, and we're not on the ground, then it's
 ; like there's no collision
 
-		lda p1_is_falling
-		beq :not_falling1
-
 		lda :y_tile
 		cmp :oldy_tile
+		bne :not_same_tile
 
+		lda :x_tile
+		cmp :oldx_tile
+		bne :not_same_tile
 
+		; we didn't move out of our tile
+		jmp :nothing_to_do
 
-
-:not_falling1
-
-:pRowOld = temp2
-:pRowNow = temp2+2
+:not_same_tile
 
 		lda :y_tile
 		jsr GetRowAddr
@@ -1593,17 +1713,64 @@ MoveFrisbee
 		jsr GetRowAddr
 		stax :pRowOld
 
+		lda :oldx_tile
+		asl
+		tay
+		lda (:pRowOld),y
+		sta :old_attr
+
 		lda :x_tile
 		asl
 		tay
 		lda (:pRowNow),y
+		sta :new_attr
 		beq :nothing_to_do
+;----
+		cmp :old_attr
+		beq :nothing_to_do
+		
+		lda :x_tile
+		cmp :oldx_tile
+		beq :check_ytile ; :no_x_worry
+;------------------------------------------------------------------------------
+		lda p1_vx+1
+		stz p1_vx      	; no flags affected
+		stz p1_vx+1
+		bpl :right      ; player is going right
+		; since the player is going left, clamp us back on the left side of the tile to our right
+		lda p1_x+1
+		ora #$0F
+		inc
+		sta p1_x+1
+		bne :x_is_good
+		inc p1_x+2
+		bra :x_is_good
 
+:right
+		; since the player is going right, clamp the x back to just outside our current tile, left
+		lda p1_x+1
+		and #$F0
+		dec
+		sta p1_x+1
+		bne :x_is_good
+		dec p1_x+2
+:x_is_good
+
+:check_ytile
+		lda :y_tile
+		cmp :oldy_tile
+		beq :nothing_to_do
+		bcc :nothing_to_do ; trying to only catch us on the way down
+
+:no_x_worry
 		; We only have one kind of tile, and at the moment we only have
 		; 1 kind of velocity
 		stz p1_vy
 		stz p1_vy+1		   ; you hit stuff, so slow down
 		stz p1_is_falling  ; you're also not falling
+		lda #1
+		sta p1_is_grounded
+		stz p1_is_jump
 
 		; up you go big guy - to the top of our tile, in fact into the tile
 		; above us, bye
@@ -1618,14 +1785,63 @@ MoveFrisbee
 :nothing_to_do
 
 		lda p1_is_falling
-		bne :isfalling
+		bne :isfalling     ; we don't want to stop falling in middle of our jump
 
+; Here we need to figure out if we're wile e coyote, are we out over nothing?
+		; Tile X = pixel X / 16
+		lda <p1_x+1
+		sta :x_tile
+		lda <p1_x+2
+		lsr
+		ror :x_tile 		; tiles are 16 x 16 pixels
+		lsr
+		ror :x_tile
+		lsr
+		ror :x_tile
+		lsr
+		ror :x_tile			 	; this is now the :x_tile number \o/
+
+		; Tile Y = pixel y / 16
+		lda <p1_y+1
+		sta :y_tile
+		lda <p1_y+2
+		lsr
+		ror :y_tile 		; tiles are 16 x 16 pixels
+		lsr
+		ror :y_tile
+		lsr
+		ror :y_tile
+		lsr
+		ror :y_tile			 	; this is now the :y_tile number \o/
+
+		lda :y_tile
+		inc
+		jsr GetRowAddr
+		stax :pRowNow
+
+		lda :x_tile
+		asl
+		tay
+		lda (:pRowNow),y
+		bne :dofrict
+
+		lda #1
+		sta p1_is_falling
+		stz p1_is_grounded
+
+		ldax #anim_def_jump
+		jsr  AnimSetAX
+
+		; bra :isfalling
+
+:dofrict
+:isfalling  ; I need friction in he air, because, I'm allowing you to control player in the air
+			; it's not real, but it's more fun
 		; player is on the ground, he needs friction
 		ldax p1_vx
 		jsr :friction
 		stax p1_vx
 
-:isfalling
 
 		; restore the io_ctrl page
 		pla
@@ -2171,45 +2387,41 @@ DoKeyUp
 		tsb p1_keyboard_raw
 		rts
 :nx4
-		do 0
 		; player 2 keys
 		cmp #$B6  ; up
 		bne :nx5
 		lda #SNES_UP
-		tsb p2_keyboard_raw
+		tsb p1_keyboard_raw
 		rts
 :nx5
 		cmp #$B8  ; left
 		bne :nx6
 		lda #SNES_LEFT
-		tsb p2_keyboard_raw
+		tsb p1_keyboard_raw
 		rts
 :nx6
 		cmp #$B7  ; down
 		bne :nx7
 		lda #SNES_DOWN
-		tsb p2_keyboard_raw
+		tsb p1_keyboard_raw
 		rts
 :nx7
 		cmp #$B9  ; right
 		bne :nx8
 		lda #SNES_RIGHT
-		tsb p2_keyboard_raw
+		tsb p1_keyboard_raw
 		rts
 :nx8
-		fin
-
 		cmp #$78 ; Throw
 		bne :nx9
 		lda #>SNES_A
 		tsb p1_keyboard_raw+1
 		rts
 :nx9
-		;cmp #$20 ; Throw
-		;bne :nx10
-		;lda #>SNES_A
-		;tsb p2_keyboard_raw+1
-		;rts
+		cmp #$20 ; Throw
+		bne :nx10
+		lda #>SNES_A
+		tsb p1_keyboard_raw+1
 :nx10
 
 		rts
@@ -2243,36 +2455,32 @@ DoKeyDown
 		lda #SNES_RIGHT
 		trb p1_keyboard_raw
 		rts
-
-		do 0
 :nx4
 		; player 2 keys
 		cmp #$B6  ; up
 		bne :nx5
 		lda #SNES_UP
-		trb p2_keyboard_raw
+		trb p1_keyboard_raw
 		rts
 :nx5
 		cmp #$B8  ; left
 		bne :nx6
 		lda #SNES_LEFT
-		trb p2_keyboard_raw
+		trb p1_keyboard_raw
 		rts
 :nx6
 		cmp #$B7  ; down
 		bne :nx7
 		lda #SNES_DOWN
-		trb p2_keyboard_raw
+		trb p1_keyboard_raw
 		rts
 :nx7
 		cmp #$B9  ; right
 		bne :nx8
 		lda #SNES_RIGHT
-		trb p2_keyboard_raw
+		trb p1_keyboard_raw
 		rts
 :nx8
-		fin
-
 		cmp #$78 ; Throw
 		bne :nx9
 		lda #>SNES_A
@@ -2280,14 +2488,11 @@ DoKeyDown
 		rts
 :nx9
 
-		;cmp #$20 ; Throw
-		;bne :nx10
-		;lda #>SNES_A
-		;trb p2_keyboard_raw+1
-		;rts
+		cmp #$20 ; Throw
+		bne :nx10
+	    lda #>SNES_A
+		trb p1_keyboard_raw+1
 :nx10
-
-
 		rts
 
 

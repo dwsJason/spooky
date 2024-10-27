@@ -79,9 +79,9 @@ cmpax mac
 	else
 
 	cpx ]1+1
-	bne @done
+	bne done
 	cmp ]1
-@done
+done
 	fin
 	<<<
 
