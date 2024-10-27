@@ -59,8 +59,6 @@ image1_start
 
 img_court	  putbin data\maps\test.256
 
-namco_font    putbin data\namco_font.font
-
 sprite_idle   putbin data\sprites\idle.256  	  ; 10
 sprite_idlel  putbin data\sprites\idle_flip.256   ; 10
 
@@ -80,7 +78,9 @@ image1_end
 		adr image2_end-image2_start  ; labels only work here, if data below is less than 64K
 		org $070000
 image2_start
+namco_font    putbin data\namco_font.font
 img_clouds    putbin data\clouds.256
+sprite_candy  putbin data\sprites\candy.256
 image2_end
 
 

@@ -63,9 +63,9 @@ frame_number ds 1
 
 p_sprite_message ds 2
 
-jiffy ds 2 ; IRQ counts this up every VBL, really doesn't need to be 2 bytes
-
 event_data ds 16
+
+jiffy ds 2 ; IRQ counts this up every VBL, really doesn't need to be 2 bytes
 
 ;-------------------------------
 ;
@@ -95,6 +95,8 @@ anim_timer ds 2
 anim_speed ds 2
 anim_sprite_frame ds 1
 anim_hflip ds 1
+
+candy_timer ds 1
 
 ;-------------------------------
 
@@ -158,6 +160,8 @@ MAP_CHAR = $30000   ; up to 256 tiles for the Current MAP
 
 SPRITE_TILES       = $40000  ; currently hold to 64k
 SPRITE_TILES_HFLIP = $50000  ; the same tiles, all HFlipped
+CANDY_SPRITES      = $60000  ; decompress last
+ENEMY_SPRITES      = $68000  ; decompress last
 
 TILE_DATA0 = MAP_CHAR
 TILE_DATA1 = SKY_CHAR
@@ -335,6 +339,10 @@ VIRQ = $FFFE
 		jsr TermCR
 		ldax p1_vy
 		jsr TermPrintAXH
+
+		jsr TermCR
+		lda <jiffy
+		jsr TermPrintAH
 
 		bra ]main_loop
 
@@ -2024,6 +2032,130 @@ P1_SP_POS_Y = VKY_SP0_POS_Y_L+P1_SP_NUM
 		sbc camera_y+1
 		sta P1_SP_POS_Y+1
 
+;------------------------------------------------------------------------------
+; Draw the Candy!
+
+VKY_SP32_CTRL = VKY_SP0_CTRL+{8*12}
+
+CANDY_CTRL = VKY_SP32_CTRL
+CANDY_AD_L = CANDY_CTRL+1
+CANDY_AD_M = CANDY_AD_L+1
+CANDY_AD_H = CANDY_AD_M+1
+CANDY_POS_X = CANDY_AD_H+1
+CANDY_POS_Y = CANDY_POS_X+2
+
+:candy_no = temp0
+:cposx = temp1
+:cposy = temp1+2
+
+		ldx #0
+		stz :candy_no   ; which candy
+
+]lp
+		lda #%00_00_10_1 ; 32x32, layer 0, lut2, enable
+		sta CANDY_CTRL,x
+		stz CANDY_AD_L,x ; page aligned
+
+		lda :candy_no
+		inc
+		asl
+		asl
+		sta CANDY_AD_M,x ; $400 per sprite frame
+
+		lda #^CANDY_SPRITES
+		sta CANDY_AD_H,x
+
+		lda :candy_no
+		asl
+		asl
+		tay
+
+; shocking, the manual lies, we have to do clipping
+
+
+		; c=0
+		sec
+		lda candy_positions,y
+		sbc camera_x
+		sta :cposx
+		lda candy_positions+1,y
+		sbc camera_x+1
+		sta :cposx+1
+
+		cmp #>352
+		beq :cchecklsb
+		bcs :cx_clip
+		bcc :cxok
+:cchecklsb
+		lda :cposx
+		cmp #<352
+		bcc :cxok
+:cx_clip
+		stz :cposx
+		stz :cposx+1
+:cxok
+		sec
+		lda candy_positions+2,y
+		sbc camera_y
+		sta :cposy
+		lda candy_positions+3,y
+		sbc camera_y+1
+		sta :cposy+1
+
+		; Animate up and down
+		phx
+		lda <jiffy
+		lsr
+		and #$1F
+		tax
+		lda |candy_anim,x
+		plx
+
+		clc
+		adc :cposy
+		sta :cposy
+		lda #0
+		adc :cposy+1
+		sta :cposy+1
+		; - done animate
+
+		;cmp #>232  ; 200 mode, would be 272 in 240 mode
+		;beq :check_loy
+		;bcc :yok
+		lda :cposy+1
+		bne :cy_clipped
+:ccheck_loy
+		lda :cposy
+		cmp #<232
+		bcc :cyok
+:cy_clipped
+		stz :cposy
+		stz :cposy+1
+:cyok
+		lda :cposx
+		sta CANDY_POS_X,x
+		lda :cposx+1
+		sta CANDY_POS_X+1,x
+
+		lda :cposy
+		sta CANDY_POS_Y,x
+		lda :cposy+1
+		sta CANDY_POS_Y+1,x
+
+		; c=?
+		clc
+		txa
+		adc #8
+		tax
+
+
+		ldy :candy_no
+		iny
+		sty :candy_no
+		cpy #17    		; 17 candy
+		bccl ]lp
+
+
 		do 0
 
 P1_SP_NUM = {8*1}
@@ -2854,16 +2986,16 @@ init320x200
 		ldx #0
 ]lp		lda CLUT_DATA,x
 		sta VKY_GR_CLUT_1,x
-		sta VKY_GR_CLUT_2,x
+;		sta VKY_GR_CLUT_2,x
 		lda CLUT_DATA+$100,x
 		sta VKY_GR_CLUT_1+$100,x
-		sta VKY_GR_CLUT_2+$100,x
+;		sta VKY_GR_CLUT_2+$100,x
 		lda CLUT_DATA+$200,x
 		sta VKY_GR_CLUT_1+$200,x
-		sta VKY_GR_CLUT_2+$200,x
+;		sta VKY_GR_CLUT_2+$200,x
 		lda CLUT_DATA+$300,x
 		sta VKY_GR_CLUT_1+$300,x
-		sta VKY_GR_CLUT_2+$300,x
+;		sta VKY_GR_CLUT_2+$300,x
 		dex
 		bne ]lp
 
@@ -2907,6 +3039,50 @@ init320x200
 		dex
 		dex
 		bpl ]lp
+;------------------------------------------------------------------------------
+;
+; Now let's decompress some candy sprites, they are going to destroy compressed
+; data in bank6, because we are tight on RAM
+;
+		ldaxy #CANDY_SPRITES
+		jsr set_write_address
+
+		ldaxy #sprite_candy
+		jsr set_read_address
+
+		jsr decompress_pixels
+
+; we need the LUT
+
+; Get the LUT Data
+
+		ldaxy #CLUT_DATA
+		jsr set_write_address
+		ldaxy #sprite_candy
+		jsr set_read_address
+
+		jsr decompress_clut
+
+		; set access to vicky CLUTs
+		lda #1
+		sta io_ctrl
+		; copy the clut up there
+		ldx #0
+]lp		lda CLUT_DATA,x
+;		sta VKY_GR_CLUT_1,x
+		sta VKY_GR_CLUT_2,x
+		lda CLUT_DATA+$100,x
+;		sta VKY_GR_CLUT_1+$100,x
+		sta VKY_GR_CLUT_2+$100,x
+		lda CLUT_DATA+$200,x
+;		sta VKY_GR_CLUT_1+$200,x
+		sta VKY_GR_CLUT_2+$200,x
+		lda CLUT_DATA+$300,x
+;		sta VKY_GR_CLUT_1+$300,x
+		sta VKY_GR_CLUT_2+$300,x
+		dex
+		bne ]lp
+
 
 		lda #2 			; back to text mapping
 		sta io_ctrl
@@ -3023,6 +3199,92 @@ anim_def_walk
 		db sp_frames_walk+4,sp_frames_walk+5,sp_frames_walk+6,sp_frames_walk+7
 		db anim_cmd_loop
 
+;------------------------------------------------------------------------------
+;
+; Sprite Registers are
+;
+; SP_NUM
+; SP_CTRL
+; SP_AD_L, SP_AD_M, SP_AD_H
+; SP_POS_X_L, SP_POS_X_H
+; SP_POS_Y_L, SP_POS_Y_H
+
+
+; we have 17 candy sprites
+
+	dum 0
+candy_blank    ds 1
+candy_frames   ds 17
+candy_sparkle  ds 3
+candy_bigone   ds 1
+candy_medone   ds 1
+candy_smlone   ds 1
+	dend
+
+;------------------------------------------------------------------------------
+candy_positions
+	dw 24+64,928	; 0
+	dw 24+336,880  	; 1
+	dw 24+768,960  	; 2
+	dw 24+960,960  	; 3
+	dw 24+960,848  	; 4
+	dw 24+208,704  	; 5
+	dw 24+64,736   	; 6
+	dw 24+480,656   ; 7
+	dw 24+960,576   ; 8
+	dw 24+576,576   ; 9
+	dw 24+48,528    ; 10
+	dw 24+96,400    ; 11
+	dw 24+768,416   ; 12
+	dw 24+960,256   ; 13
+	dw 24+32,272    ; 14
+	dw 24+720,192   ; 15
+	dw 24+912,48    ; 16
+
+;------------------------------------------------------------------------------
+
+candy_anim
+	db 8
+	db 8
+	db 8
+	db 7
+
+	db 7
+	db 7
+	db 7
+	db 7
+
+	db 6
+	db 6
+	db 6
+	db 5
+
+	db 5
+	db 4
+	db 3
+	db 1
+
+	db 0
+	db 1
+	db 3
+	db 4
+
+	db 5
+	db 5
+	db 6
+	db 6
+
+	db 7
+	db 7
+	db 7
+	db 7
+
+	db 8
+	db 8
+	db 8
+	db 8
+
+;candy_sprites
 
 
 		 
