@@ -236,13 +236,13 @@ start
 		; Player 1 position, and velocity
 
 		stz p1_x
-		;ldax #128
-		ldax #500
+		ldax #32
+		;ldax #776
 		stax p1_x+1
 		
 		stz p1_y
-		;ldax #1024-48-32
-		ldax #768
+		ldax #850
+		;ldax #72
 		stax p1_y+1
 
 		stz p1_vx
@@ -1760,7 +1760,9 @@ MoveFrisbee
 		lda :y_tile
 		cmp :oldy_tile
 		beq :nothing_to_do
-		bcc :nothing_to_do ; trying to only catch us on the way down
+		bcc :nothing_to_do  ; trying to only catch us on the way down
+		lda p1_vy+1
+		bmi :nothing_to_do	; again, only catch on the way down
 
 :no_x_worry
 		; We only have one kind of tile, and at the moment we only have
