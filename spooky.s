@@ -1812,6 +1812,10 @@ MoveFrisbee
 		lda #1
 		sta p1_is_falling
 		stz p1_is_grounded
+
+		ldax #anim_def_jump
+		jsr  AnimSetAX
+
 		; bra :isfalling
 
 :dofrict
