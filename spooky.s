@@ -1520,8 +1520,12 @@ MoveFrisbee
 :p1_vx_ext = temp1+2
 :p1_vy_ext = temp1+3
 
-:old_attr = temp2
-:new_attr = temp2+2
+:old_attr = temp3
+:new_attr = temp3+1
+
+:pRowOld = temp2
+:pRowNow = temp2+2
+
 
 ; sign extension for vx and vy, for math below
 		stz <:p1_vx_ext
@@ -1687,9 +1691,6 @@ MoveFrisbee
 
 :not_same_tile
 
-:pRowOld = temp2
-:pRowNow = temp2+2
-
 		lda :y_tile
 		jsr GetRowAddr
 		stax :pRowNow
@@ -1770,6 +1771,50 @@ MoveFrisbee
 		lda p1_is_falling
 		bne :isfalling     ; we don't want to stop falling in middle of our jump
 
+; Here we need to figure out if we're wile e coyote, are we out over nothing?
+		; Tile X = pixel X / 16
+		lda <p1_x+1
+		sta :x_tile
+		lda <p1_x+2
+		lsr
+		ror :x_tile 		; tiles are 16 x 16 pixels
+		lsr
+		ror :x_tile
+		lsr
+		ror :x_tile
+		lsr
+		ror :x_tile			 	; this is now the :x_tile number \o/
+
+		; Tile Y = pixel y / 16
+		lda <p1_y+1
+		sta :y_tile
+		lda <p1_y+2
+		lsr
+		ror :y_tile 		; tiles are 16 x 16 pixels
+		lsr
+		ror :y_tile
+		lsr
+		ror :y_tile
+		lsr
+		ror :y_tile			 	; this is now the :y_tile number \o/
+
+		lda :y_tile
+		inc
+		jsr GetRowAddr
+		stax :pRowNow
+
+		lda :x_tile
+		asl
+		tay
+		lda (:pRowNow),y
+		bne :dofrict
+
+		lda #1
+		sta p1_is_falling
+		stz p1_is_grounded
+		; bra :isfalling
+
+:dofrict
 		; player is on the ground, he needs friction
 		ldax p1_vx
 		jsr :friction
