@@ -16,7 +16,7 @@ PLAYER_FRICTION = $00E0   ; 8.8 here
 ACCEL_X  = $0030 	;$0030    ; 8.8 fixed point, if max speed is 2.0, then lets spend 16 frames getting there
 ACCEL_Y  = 0 ; $0030
 
-JUMP_VEL = $0300
+JUMP_VEL = $0320
 
 GRAVITY = $0029       ; 9.8/60 ; 8.8 FIXED POINT
 
@@ -1728,7 +1728,7 @@ MoveFrisbee
 ;----
 		cmp :old_attr
 		beq :nothing_to_do
-
+		
 		lda :x_tile
 		cmp :oldx_tile
 		beq :check_ytile ; :no_x_worry
@@ -1760,6 +1760,7 @@ MoveFrisbee
 		lda :y_tile
 		cmp :oldy_tile
 		beq :nothing_to_do
+		bcc :nothing_to_do ; trying to only catch us on the way down
 
 :no_x_worry
 		; We only have one kind of tile, and at the moment we only have
@@ -2386,45 +2387,41 @@ DoKeyUp
 		tsb p1_keyboard_raw
 		rts
 :nx4
-		do 0
 		; player 2 keys
 		cmp #$B6  ; up
 		bne :nx5
 		lda #SNES_UP
-		tsb p2_keyboard_raw
+		tsb p1_keyboard_raw
 		rts
 :nx5
 		cmp #$B8  ; left
 		bne :nx6
 		lda #SNES_LEFT
-		tsb p2_keyboard_raw
+		tsb p1_keyboard_raw
 		rts
 :nx6
 		cmp #$B7  ; down
 		bne :nx7
 		lda #SNES_DOWN
-		tsb p2_keyboard_raw
+		tsb p1_keyboard_raw
 		rts
 :nx7
 		cmp #$B9  ; right
 		bne :nx8
 		lda #SNES_RIGHT
-		tsb p2_keyboard_raw
+		tsb p1_keyboard_raw
 		rts
 :nx8
-		fin
-
 		cmp #$78 ; Throw
 		bne :nx9
 		lda #>SNES_A
 		tsb p1_keyboard_raw+1
 		rts
 :nx9
-		;cmp #$20 ; Throw
-		;bne :nx10
-		;lda #>SNES_A
-		;tsb p2_keyboard_raw+1
-		;rts
+		cmp #$20 ; Throw
+		bne :nx10
+		lda #>SNES_A
+		tsb p1_keyboard_raw+1
 :nx10
 
 		rts
@@ -2459,35 +2456,31 @@ DoKeyDown
 		trb p1_keyboard_raw
 		rts
 :nx4
-
-		do 0
 		; player 2 keys
 		cmp #$B6  ; up
 		bne :nx5
 		lda #SNES_UP
-		trb p2_keyboard_raw
+		trb p1_keyboard_raw
 		rts
 :nx5
 		cmp #$B8  ; left
 		bne :nx6
 		lda #SNES_LEFT
-		trb p2_keyboard_raw
+		trb p1_keyboard_raw
 		rts
 :nx6
 		cmp #$B7  ; down
 		bne :nx7
 		lda #SNES_DOWN
-		trb p2_keyboard_raw
+		trb p1_keyboard_raw
 		rts
 :nx7
 		cmp #$B9  ; right
 		bne :nx8
 		lda #SNES_RIGHT
-		trb p2_keyboard_raw
+		trb p1_keyboard_raw
 		rts
 :nx8
-		fin
-
 		cmp #$78 ; Throw
 		bne :nx9
 		lda #>SNES_A
@@ -2495,14 +2488,11 @@ DoKeyDown
 		rts
 :nx9
 
-		;cmp #$20 ; Throw
-		;bne :nx10
-		;lda #>SNES_A
-		;trb p2_keyboard_raw+1
-		;rts
+		cmp #$20 ; Throw
+		bne :nx10
+	    lda #>SNES_A
+		trb p1_keyboard_raw+1
 :nx10
-
-
 		rts
 
 
