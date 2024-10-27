@@ -2393,9 +2393,9 @@ DoKeyDown
 		lda #SNES_RIGHT
 		trb p1_keyboard_raw
 		rts
+:nx4
 
 		do 0
-:nx4
 		; player 2 keys
 		cmp #$B6  ; up
 		bne :nx5
