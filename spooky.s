@@ -87,6 +87,7 @@ p1_vy ds 2
 
 p1_is_falling  ds 1
 p1_is_grounded ds 1
+p1_is_jump     ds 1
 
 pAnim ds 2 ; pointer to the current animation sequence 
 anim_index ds 1
@@ -696,13 +697,25 @@ GameControls
 		bit #>SNES_A.SNES_X		; checks AXYB
 		beq :no_jump
 
+		lda p1_is_jump			; for the double jump
+		cmp #2
+		bcs :no_jump
+		inc
+		sta p1_is_jump
+
 		; jump
-		sec
-		lda p1_vy
-		sbc #JUMP_VEL
+		;sec
+		;lda p1_vy
+		;sbc #JUMP_VEL
+		;sta p1_vy
+		;lda p1_vy+1
+		;sbc #>JUMP_VEL
+		;sta p1_vy+1
+
+		; This feels better for double jump
+		lda #0-JUMP_VEL
 		sta p1_vy
-		lda p1_vy+1
-		sbc #>JUMP_VEL
+		lda #>0-JUMP_VEL
 		sta p1_vy+1
 
 		stz p1_is_grounded
@@ -952,8 +965,9 @@ MovePlayerControls
 		; these load 4 bits
 		; Up, Down, Left, Right respectively
 
-		lda p1_is_falling
-		bne :is_falling
+		; removed this, because it's more fun to control the player while falling
+		;lda p1_is_falling
+		;bne :is_falling
 
 		; These accelerations do not apply, unless we are on the ground
 
@@ -1755,6 +1769,7 @@ MoveFrisbee
 		stz p1_is_falling  ; you're also not falling
 		lda #1
 		sta p1_is_grounded
+		stz p1_is_jump
 
 		; up you go big guy - to the top of our tile, in fact into the tile
 		; above us, bye
@@ -1819,12 +1834,13 @@ MoveFrisbee
 		; bra :isfalling
 
 :dofrict
+:isfalling  ; I need friction in he air, because, I'm allowing you to control player in the air
+			; it's not real, but it's more fun
 		; player is on the ground, he needs friction
 		ldax p1_vx
 		jsr :friction
 		stax p1_vx
 
-:isfalling
 
 		; restore the io_ctrl page
 		pla
