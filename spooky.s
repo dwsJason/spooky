@@ -646,6 +646,15 @@ PlayerCandyCollision
 		lda :dx+1
 		bne :next_candy ; out of range
 
+		lda :dy
+		cmp #16
+		bcs :next_candy
+
+		lda :dx
+		cmp #16
+		bcs :next_candy
+
+		do 0
 		lda :dx 		; dx * dx
 		sta MULU_A_L
 		stz MULU_A_H
@@ -666,6 +675,7 @@ PlayerCandyCollision
 
 		lda ADD_R_LH   ; total of the squared values
 		bne :no_catch
+		fin
 
 		;lda ADD_R_LL
 		;cmp #CATCH_RADIUS*CATCH_RADIUS
