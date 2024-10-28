@@ -25,7 +25,7 @@ MIN_FRISBEE_VX = $0080
 
 ;NOTE, the largest this can be is 15
 ; with the current code
-CATCH_RADIUS = 8 ; this is +/- pixels radius, so 8 would be 16 pixel sized circle
+CATCH_RADIUS = 15 ; this is +/- pixels radius, so 8 would be 16 pixel sized circle
 
 
 ; System Bus Pointer's
@@ -97,6 +97,7 @@ anim_sprite_frame ds 1
 anim_hflip ds 1
 
 candy_timer ds 1
+candy_score ds 1
 
 ;-------------------------------
 
@@ -217,6 +218,12 @@ start
 		ldax #txt_platform
 		jsr TermPUTS
 
+		ldx #1
+		ldy #1
+		jsr TermSetXY
+		ldax #txt_score
+		jsr TermPUTS
+
 ;------------------------------------------------------------------------------
 ;
 ; Some Kernel Stuff here
@@ -254,6 +261,9 @@ start
 		stz p1_vy
 		stz p1_vy+1
 		stz anim_hflip
+
+		stz candy_timer
+		stz candy_score
 
 		lda #1
 		sta p1_is_falling
@@ -296,8 +306,8 @@ VIRQ = $FFFE
 		; then bounds check stuff
 		; get rid of player bouncing
 
-		ldax #p1_bounds_table
-		stax temp0
+		;ldax #p1_bounds_table
+		;stax temp0
 
 		;ldx #p1_x
 		;jsr PlayerBounds
@@ -307,7 +317,8 @@ VIRQ = $FFFE
 
 ;------------------------------------------------------------------------------
 
-		;jsr PlayerDiscCollision
+		sei
+		jsr PlayerCandyCollision
 
 ;------------------------------------------------------------------------------
 
@@ -324,6 +335,7 @@ VIRQ = $FFFE
 		sta io_ctrl
 ;------------------------------------------------------------------------------
 
+		do 0  ; debug stuff
 		ldx #1
 		ldy #1
 		jsr TermSetXY
@@ -343,7 +355,26 @@ VIRQ = $FFFE
 		jsr TermCR
 		lda <jiffy
 		jsr TermPrintAH
+		fin
 
+		ldy #1
+		ldx #7
+		jsr TermSetXY
+
+		lda candy_score
+		jsr TermPrintAI
+
+		lda candy_score
+		cmp #17
+		bcc :not_win
+
+		ldx #0
+		ldy #9
+		jsr TermSetXY
+		ldax #txt_winner
+		jsr TermPUTS
+
+:not_win
 		bra ]main_loop
 
 		;inc <jiffy  ; since we don't have IRQ doing this
@@ -547,101 +578,74 @@ AnimSetAX
 
 ;;-----------------------------------------------------------------------------
 
-PlayerDiscCollision
-		rts
+PlayerCandyCollision
 
-		do 0
-; ok, did we catch it?
-
-		stz io_ctrl
-
-		lda :dx 		; dx * dx
-		sta MULU_A_L
-		stz MULU_A_H
-		sta MULU_B_L
-		stz MULU_B_H
-
-		ldax MULU_LL
-		stax ADD_A_LL
-
-		lda :dy
-		sta MULU_A_L  	; dy * dy
-		stz MULU_A_H
-		sta MULU_B_L
-		stz MULU_B_H
-
-		ldax MULU_LL
-		stax ADD_B_LL
-
-		lda ADD_R_LH   ; total of the squared values
-		bne :no_catch
-
-		lda ADD_R_LL
-		cmp #CATCH_RADIUS*CATCH_RADIUS
-		bcs :no_catch
-
-		; caught it, we'll have to add something
-		; to player movement, to drag this along with us
-		lda #1
-		;sta frisbee_state ; P2
-
-		;stz frisbee_vx
-		;stz frisbee_vx+1
-		;stz frisbee_vy
-		;stz frisbee_vy+1
-
-:no_catch
-
-		ldy #2
-		sty io_ctrl
-		fin
-		rts
-
-Player1Check
-		rts
-		do 0
 :dx = temp0
-:dy = temp0+1
+:dy = temp0+2
+:candy_count = temp1
 
-		; Get DX from player 1
-		sec
-		lda p1_x+1
-		sbc frisbee_x+1
-		bcs :no_borrow
+:candyx = temp2
+:candyy = temp2+2
 
-		; negate, so we have a positive value
-		eor #$ff
-		inc
-
-:no_borrow
-		sta :dx
-
-		; Get DY from player 1
-		sec
-		lda p1_y+1
-		sbc frisbee_y+1
-		bcs :no_borrow2
-
-		; negate, so we have a positive value
-		eor #$FF
-		inc
-
-:no_borrow2
-
-		sta :dy
-
-; these values look good
-;		ldx #0
-;		ldy #1
-;		jsr TermSetXY
-;
-;		ldax :dx
-;		jsr TermPrintAXH
-
-
-; ok, did we catch it?
+; ok, did we catch candy?
 
 		stz io_ctrl
+
+		stz :candy_count
+]loop
+		ldx :candy_count
+		lda |candy_status,x
+		bnel :next_candy
+
+		txa
+		asl
+		asl
+		tax
+		sec
+		lda candy_positions,x
+		sbc #16
+		sta :candyx
+		lda candy_positions+1,x
+		sbc #0
+		sta :candyx+1
+
+		lda candy_positions+2,x
+		sta :candyy
+		lda candy_positions+3,x
+		sta :candyy+1
+
+		; dx
+		sec
+		lda :candyx
+		sbc p1_x+1
+		sta :dx
+		lda :candyx+1
+		sbc p1_x+2
+		sta :dx+1
+
+		; abs
+		ldax :dx
+		jsr make_ax_positive
+		stax :dx
+
+		; dy
+		sec
+		lda :candyy
+		sbc p1_y+1
+		sta :dy
+		lda :candyy+1
+		sbc p1_y+2
+		sta :dy+1
+
+		; abs
+		ldax :dy
+		jsr make_ax_positive
+		stax :dy
+
+		lda :dy+1
+		bne :next_candy ; out of range
+		lda :dx+1
+		bne :next_candy ; out of range
 
 		lda :dx 		; dx * dx
 		sta MULU_A_L
@@ -664,28 +668,27 @@ Player1Check
 		lda ADD_R_LH   ; total of the squared values
 		bne :no_catch
 
-		lda ADD_R_LL
-		cmp #CATCH_RADIUS*CATCH_RADIUS
-		bcs :no_catch
+		;lda ADD_R_LL
+		;cmp #CATCH_RADIUS*CATCH_RADIUS
+		;bcs :no_catch
 
 		; caught it, we'll have to add something
 		; to player movement, to drag this along with us
-		stz frisbee_state ; P1
+		ldx :candy_count
+		lda #1
+		sta candy_status,x
 
-		stz frisbee_vx
-		stz frisbee_vx+1
-		stz frisbee_vy
-		stz frisbee_vy+1
-
+		inc candy_score
 :no_catch
-
-;		ldax MULU_LL
+:next_candy
+		lda :candy_count
+		inc
+		sta :candy_count
+		cmp #17
+		bccl ]loop
 
 		ldy #2
 		sty io_ctrl
-
-;		jsr TermPrintAXH
-		fin
 		rts
 
 ;------------------------------------------------------------------------------
@@ -708,7 +711,7 @@ GameControls
 		lda p1_is_jump			; for the double jump
 		cmp #2
 		bcs :no_jump
-		inc
+		;inc ;; allow all jump
 		sta p1_is_jump
 
 		; jump
@@ -2056,11 +2059,23 @@ CANDY_POS_Y = CANDY_POS_X+2
 		sta CANDY_CTRL,x
 		stz CANDY_AD_L,x ; page aligned
 
-		lda :candy_no
+		ldy :candy_no
+
+		lda candy_status,y
+		beq :normal_candy
+
+		lda #candy_bigone*4
+		bra :big_one
+
+
+:normal_candy
+		tya
 		inc
 		asl
 		asl
+:big_one
 		sta CANDY_AD_M,x ; $400 per sprite frame
+
 
 		lda #^CANDY_SPRITES
 		sta CANDY_AD_H,x
@@ -3115,10 +3130,10 @@ init320x200
 ;------------------------------------------------------------------------------
 
 txt_platform asc 'SPOOKY RUN',00
-;txt_help2	asc 'KEEP THE DISC FROM PASSING BY',00
-;txt_button_down asc 'BUTTON DOWN',0D,00
-;txt_button_up asc 'BUTTON UP',0D,00
-;txt_help asc 'SNES 1VS2 OR WASD+X VS ARROW KEYS+SPACE',00
+txt_score    asc 'SCORE',00
+txt_winner   asc '             CONGRATULATIONS!!!',0D,0D
+	     asc '               SPOOKY WINNER',0D,0D
+	     asc '            YOU BEAT SPOOKY RUN!',0D,00
 
 ;------------------------------------------------------------------------------
 ;
@@ -3240,6 +3255,12 @@ candy_positions
 	dw 24+32,272    ; 14
 	dw 24+720,192   ; 15
 	dw 24+912,48    ; 16
+
+;------------------------------------------------------------------------------
+
+candy_status
+	ds 32
+
 
 ;------------------------------------------------------------------------------
 
