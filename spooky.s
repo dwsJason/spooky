@@ -25,7 +25,7 @@ MIN_FRISBEE_VX = $0080
 
 ;NOTE, the largest this can be is 15
 ; with the current code
-CATCH_RADIUS = 8 ; this is +/- pixels radius, so 8 would be 16 pixel sized circle
+CATCH_RADIUS = 15 ; this is +/- pixels radius, so 8 would be 16 pixel sized circle
 
 
 ; System Bus Pointer's
@@ -63,9 +63,9 @@ frame_number ds 1
 
 p_sprite_message ds 2
 
-jiffy ds 2 ; IRQ counts this up every VBL, really doesn't need to be 2 bytes
-
 event_data ds 16
+
+jiffy ds 2 ; IRQ counts this up every VBL, really doesn't need to be 2 bytes
 
 ;-------------------------------
 ;
@@ -95,6 +95,9 @@ anim_timer ds 2
 anim_speed ds 2
 anim_sprite_frame ds 1
 anim_hflip ds 1
+
+candy_timer ds 1
+candy_score ds 1
 
 ;-------------------------------
 
@@ -158,6 +161,8 @@ MAP_CHAR = $30000   ; up to 256 tiles for the Current MAP
 
 SPRITE_TILES       = $40000  ; currently hold to 64k
 SPRITE_TILES_HFLIP = $50000  ; the same tiles, all HFlipped
+CANDY_SPRITES      = $60000  ; decompress last
+ENEMY_SPRITES      = $68000  ; decompress last
 
 TILE_DATA0 = MAP_CHAR
 TILE_DATA1 = SKY_CHAR
@@ -213,6 +218,12 @@ start
 		ldax #txt_platform
 		jsr TermPUTS
 
+		ldx #1
+		ldy #1
+		jsr TermSetXY
+		ldax #txt_score
+		jsr TermPUTS
+
 ;------------------------------------------------------------------------------
 ;
 ; Some Kernel Stuff here
@@ -236,13 +247,13 @@ start
 		; Player 1 position, and velocity
 
 		stz p1_x
-		;ldax #128
-		ldax #500
+		ldax #32
+		;ldax #776
 		stax p1_x+1
 		
 		stz p1_y
-		;ldax #1024-48-32
-		ldax #768
+		ldax #850
+		;ldax #72
 		stax p1_y+1
 
 		stz p1_vx
@@ -250,6 +261,9 @@ start
 		stz p1_vy
 		stz p1_vy+1
 		stz anim_hflip
+
+		stz candy_timer
+		stz candy_score
 
 		lda #1
 		sta p1_is_falling
@@ -292,8 +306,8 @@ VIRQ = $FFFE
 		; then bounds check stuff
 		; get rid of player bouncing
 
-		ldax #p1_bounds_table
-		stax temp0
+		;ldax #p1_bounds_table
+		;stax temp0
 
 		;ldx #p1_x
 		;jsr PlayerBounds
@@ -303,7 +317,7 @@ VIRQ = $FFFE
 
 ;------------------------------------------------------------------------------
 
-		;jsr PlayerDiscCollision
+		jsr PlayerCandyCollision
 
 ;------------------------------------------------------------------------------
 
@@ -320,6 +334,7 @@ VIRQ = $FFFE
 		sta io_ctrl
 ;------------------------------------------------------------------------------
 
+		do 0  ; debug stuff
 		ldx #1
 		ldy #1
 		jsr TermSetXY
@@ -336,6 +351,29 @@ VIRQ = $FFFE
 		ldax p1_vy
 		jsr TermPrintAXH
 
+		jsr TermCR
+		lda <jiffy
+		jsr TermPrintAH
+		fin
+
+		ldy #1
+		ldx #7
+		jsr TermSetXY
+
+		lda candy_score
+		jsr TermPrintAI
+
+		lda candy_score
+		cmp #17
+		bcc :not_win
+
+		ldx #0
+		ldy #9
+		jsr TermSetXY
+		ldax #txt_winner
+		jsr TermPUTS
+
+:not_win
 		bra ]main_loop
 
 		;inc <jiffy  ; since we don't have IRQ doing this
@@ -539,102 +577,84 @@ AnimSetAX
 
 ;;-----------------------------------------------------------------------------
 
-PlayerDiscCollision
-		rts
+PlayerCandyCollision
 
-		do 0
-; ok, did we catch it?
-
-		stz io_ctrl
-
-		lda :dx 		; dx * dx
-		sta MULU_A_L
-		stz MULU_A_H
-		sta MULU_B_L
-		stz MULU_B_H
-
-		ldax MULU_LL
-		stax ADD_A_LL
-
-		lda :dy
-		sta MULU_A_L  	; dy * dy
-		stz MULU_A_H
-		sta MULU_B_L
-		stz MULU_B_H
-
-		ldax MULU_LL
-		stax ADD_B_LL
-
-		lda ADD_R_LH   ; total of the squared values
-		bne :no_catch
-
-		lda ADD_R_LL
-		cmp #CATCH_RADIUS*CATCH_RADIUS
-		bcs :no_catch
-
-		; caught it, we'll have to add something
-		; to player movement, to drag this along with us
-		lda #1
-		;sta frisbee_state ; P2
-
-		;stz frisbee_vx
-		;stz frisbee_vx+1
-		;stz frisbee_vy
-		;stz frisbee_vy+1
-
-:no_catch
-
-		ldy #2
-		sty io_ctrl
-		fin
-		rts
-
-Player1Check
-		rts
-		do 0
 :dx = temp0
-:dy = temp0+1
+:dy = temp0+2
+:candy_count = temp1
 
-		; Get DX from player 1
-		sec
-		lda p1_x+1
-		sbc frisbee_x+1
-		bcs :no_borrow
+:candyx = temp2
+:candyy = temp2+2
 
-		; negate, so we have a positive value
-		eor #$ff
-		inc
-
-:no_borrow
-		sta :dx
-
-		; Get DY from player 1
-		sec
-		lda p1_y+1
-		sbc frisbee_y+1
-		bcs :no_borrow2
-
-		; negate, so we have a positive value
-		eor #$FF
-		inc
-
-:no_borrow2
-
-		sta :dy
-
-; these values look good
-;		ldx #0
-;		ldy #1
-;		jsr TermSetXY
-;
-;		ldax :dx
-;		jsr TermPrintAXH
-
-
-; ok, did we catch it?
+; ok, did we catch candy?
 
 		stz io_ctrl
 
+		stz :candy_count
+]loop
+		ldx :candy_count
+		lda |candy_status,x
+		bnel :next_candy
+
+		txa
+		asl
+		asl
+		tax
+		sec
+		lda candy_positions,x
+		sbc #16
+		sta :candyx
+		lda candy_positions+1,x
+		sbc #0
+		sta :candyx+1
+
+		lda candy_positions+2,x
+		sta :candyy
+		lda candy_positions+3,x
+		sta :candyy+1
+
+		; dx
+		sec
+		lda :candyx
+		sbc p1_x+1
+		sta :dx
+		lda :candyx+1
+		sbc p1_x+2
+		sta :dx+1
+
+		; abs
+		ldax :dx
+		jsr make_ax_positive
+		stax :dx
+
+		; dy
+		sec
+		lda :candyy
+		sbc p1_y+1
+		sta :dy
+		lda :candyy+1
+		sbc p1_y+2
+		sta :dy+1
+
+		; abs
+		ldax :dy
+		jsr make_ax_positive
+		stax :dy
+
+		lda :dy+1
+		bne :next_candy ; out of range
+		lda :dx+1
+		bne :next_candy ; out of range
+
+		lda :dy
+		cmp #16
+		bcs :next_candy
+
+		lda :dx
+		cmp #16
+		bcs :next_candy
+
+		do 0
 		lda :dx 		; dx * dx
 		sta MULU_A_L
 		stz MULU_A_H
@@ -655,29 +675,29 @@ Player1Check
 
 		lda ADD_R_LH   ; total of the squared values
 		bne :no_catch
+		fin
 
-		lda ADD_R_LL
-		cmp #CATCH_RADIUS*CATCH_RADIUS
-		bcs :no_catch
+		;lda ADD_R_LL
+		;cmp #CATCH_RADIUS*CATCH_RADIUS
+		;bcs :no_catch
 
 		; caught it, we'll have to add something
 		; to player movement, to drag this along with us
-		stz frisbee_state ; P1
+		ldx :candy_count
+		lda #1
+		sta candy_status,x
 
-		stz frisbee_vx
-		stz frisbee_vx+1
-		stz frisbee_vy
-		stz frisbee_vy+1
-
+		inc candy_score
 :no_catch
-
-;		ldax MULU_LL
+:next_candy
+		lda :candy_count
+		inc
+		sta :candy_count
+		cmp #17
+		bccl ]loop
 
 		ldy #2
 		sty io_ctrl
-
-;		jsr TermPrintAXH
-		fin
 		rts
 
 ;------------------------------------------------------------------------------
@@ -700,7 +720,7 @@ GameControls
 		lda p1_is_jump			; for the double jump
 		cmp #2
 		bcs :no_jump
-		inc
+		inc ;; allow all jump
 		sta p1_is_jump
 
 		; jump
@@ -1760,7 +1780,9 @@ MoveFrisbee
 		lda :y_tile
 		cmp :oldy_tile
 		beq :nothing_to_do
-		bcc :nothing_to_do ; trying to only catch us on the way down
+		bcc :nothing_to_do  ; trying to only catch us on the way down
+		lda p1_vy+1
+		bmi :nothing_to_do	; again, only catch on the way down
 
 :no_x_worry
 		; We only have one kind of tile, and at the moment we only have
@@ -2021,6 +2043,142 @@ P1_SP_POS_Y = VKY_SP0_POS_Y_L+P1_SP_NUM
 		lda :p1y+1
 		sbc camera_y+1
 		sta P1_SP_POS_Y+1
+
+;------------------------------------------------------------------------------
+; Draw the Candy!
+
+VKY_SP32_CTRL = VKY_SP0_CTRL+{8*12}
+
+CANDY_CTRL = VKY_SP32_CTRL
+CANDY_AD_L = CANDY_CTRL+1
+CANDY_AD_M = CANDY_AD_L+1
+CANDY_AD_H = CANDY_AD_M+1
+CANDY_POS_X = CANDY_AD_H+1
+CANDY_POS_Y = CANDY_POS_X+2
+
+:candy_no = temp0
+:cposx = temp1
+:cposy = temp1+2
+
+		ldx #0
+		stz :candy_no   ; which candy
+
+]lp
+		lda #%00_00_10_1 ; 32x32, layer 0, lut2, enable
+		sta CANDY_CTRL,x
+		stz CANDY_AD_L,x ; page aligned
+
+		ldy :candy_no
+
+		lda candy_status,y
+		beq :normal_candy
+
+		lda #candy_bigone*4
+		bra :big_one
+
+
+:normal_candy
+		tya
+		inc
+		asl
+		asl
+:big_one
+		sta CANDY_AD_M,x ; $400 per sprite frame
+
+
+		lda #^CANDY_SPRITES
+		sta CANDY_AD_H,x
+
+		lda :candy_no
+		asl
+		asl
+		tay
+
+; shocking, the manual lies, we have to do clipping
+
+
+		; c=0
+		sec
+		lda candy_positions,y
+		sbc camera_x
+		sta :cposx
+		lda candy_positions+1,y
+		sbc camera_x+1
+		sta :cposx+1
+
+		cmp #>352
+		beq :cchecklsb
+		bcs :cx_clip
+		bcc :cxok
+:cchecklsb
+		lda :cposx
+		cmp #<352
+		bcc :cxok
+:cx_clip
+		stz :cposx
+		stz :cposx+1
+:cxok
+		sec
+		lda candy_positions+2,y
+		sbc camera_y
+		sta :cposy
+		lda candy_positions+3,y
+		sbc camera_y+1
+		sta :cposy+1
+
+		; Animate up and down
+		phx
+		lda <jiffy
+		lsr
+		and #$1F
+		tax
+		lda |candy_anim,x
+		plx
+
+		clc
+		adc :cposy
+		sta :cposy
+		lda #0
+		adc :cposy+1
+		sta :cposy+1
+		; - done animate
+
+		;cmp #>232  ; 200 mode, would be 272 in 240 mode
+		;beq :check_loy
+		;bcc :yok
+		lda :cposy+1
+		bne :cy_clipped
+:ccheck_loy
+		lda :cposy
+		cmp #<232
+		bcc :cyok
+:cy_clipped
+		stz :cposy
+		stz :cposy+1
+:cyok
+		lda :cposx
+		sta CANDY_POS_X,x
+		lda :cposx+1
+		sta CANDY_POS_X+1,x
+
+		lda :cposy
+		sta CANDY_POS_Y,x
+		lda :cposy+1
+		sta CANDY_POS_Y+1,x
+
+		; c=?
+		clc
+		txa
+		adc #8
+		tax
+
+
+		ldy :candy_no
+		iny
+		sty :candy_no
+		cpy #17    		; 17 candy
+		bccl ]lp
+
 
 		do 0
 
@@ -2852,16 +3010,16 @@ init320x200
 		ldx #0
 ]lp		lda CLUT_DATA,x
 		sta VKY_GR_CLUT_1,x
-		sta VKY_GR_CLUT_2,x
+;		sta VKY_GR_CLUT_2,x
 		lda CLUT_DATA+$100,x
 		sta VKY_GR_CLUT_1+$100,x
-		sta VKY_GR_CLUT_2+$100,x
+;		sta VKY_GR_CLUT_2+$100,x
 		lda CLUT_DATA+$200,x
 		sta VKY_GR_CLUT_1+$200,x
-		sta VKY_GR_CLUT_2+$200,x
+;		sta VKY_GR_CLUT_2+$200,x
 		lda CLUT_DATA+$300,x
 		sta VKY_GR_CLUT_1+$300,x
-		sta VKY_GR_CLUT_2+$300,x
+;		sta VKY_GR_CLUT_2+$300,x
 		dex
 		bne ]lp
 
@@ -2905,6 +3063,50 @@ init320x200
 		dex
 		dex
 		bpl ]lp
+;------------------------------------------------------------------------------
+;
+; Now let's decompress some candy sprites, they are going to destroy compressed
+; data in bank6, because we are tight on RAM
+;
+		ldaxy #CANDY_SPRITES
+		jsr set_write_address
+
+		ldaxy #sprite_candy
+		jsr set_read_address
+
+		jsr decompress_pixels
+
+; we need the LUT
+
+; Get the LUT Data
+
+		ldaxy #CLUT_DATA
+		jsr set_write_address
+		ldaxy #sprite_candy
+		jsr set_read_address
+
+		jsr decompress_clut
+
+		; set access to vicky CLUTs
+		lda #1
+		sta io_ctrl
+		; copy the clut up there
+		ldx #0
+]lp		lda CLUT_DATA,x
+;		sta VKY_GR_CLUT_1,x
+		sta VKY_GR_CLUT_2,x
+		lda CLUT_DATA+$100,x
+;		sta VKY_GR_CLUT_1+$100,x
+		sta VKY_GR_CLUT_2+$100,x
+		lda CLUT_DATA+$200,x
+;		sta VKY_GR_CLUT_1+$200,x
+		sta VKY_GR_CLUT_2+$200,x
+		lda CLUT_DATA+$300,x
+;		sta VKY_GR_CLUT_1+$300,x
+		sta VKY_GR_CLUT_2+$300,x
+		dex
+		bne ]lp
+
 
 		lda #2 			; back to text mapping
 		sta io_ctrl
@@ -2937,10 +3139,10 @@ init320x200
 ;------------------------------------------------------------------------------
 
 txt_platform asc 'SPOOKY RUN',00
-;txt_help2	asc 'KEEP THE DISC FROM PASSING BY',00
-;txt_button_down asc 'BUTTON DOWN',0D,00
-;txt_button_up asc 'BUTTON UP',0D,00
-;txt_help asc 'SNES 1VS2 OR WASD+X VS ARROW KEYS+SPACE',00
+txt_score    asc 'SCORE',00
+txt_winner   asc '             CONGRATULATIONS!!!',0D,0D
+	     asc '               SPOOKY WINNER',0D,0D
+	     asc '            YOU BEAT SPOOKY RUN!',0D,00
 
 ;------------------------------------------------------------------------------
 ;
@@ -3021,6 +3223,98 @@ anim_def_walk
 		db sp_frames_walk+4,sp_frames_walk+5,sp_frames_walk+6,sp_frames_walk+7
 		db anim_cmd_loop
 
+;------------------------------------------------------------------------------
+;
+; Sprite Registers are
+;
+; SP_NUM
+; SP_CTRL
+; SP_AD_L, SP_AD_M, SP_AD_H
+; SP_POS_X_L, SP_POS_X_H
+; SP_POS_Y_L, SP_POS_Y_H
+
+
+; we have 17 candy sprites
+
+	dum 0
+candy_blank    ds 1
+candy_frames   ds 17
+candy_sparkle  ds 3
+candy_bigone   ds 1
+candy_medone   ds 1
+candy_smlone   ds 1
+	dend
+
+;------------------------------------------------------------------------------
+candy_positions
+	dw 24+64,928	; 0
+	dw 24+336,880  	; 1
+	dw 24+768,960  	; 2
+	dw 24+960,960  	; 3
+	dw 24+960,848  	; 4
+	dw 24+208,704  	; 5
+	dw 24+64,736   	; 6
+	dw 24+480,656   ; 7
+	dw 24+960,576   ; 8
+	dw 24+576,576   ; 9
+	dw 24+48,528    ; 10
+	dw 24+96,400    ; 11
+	dw 24+768,416   ; 12
+	dw 24+960,256   ; 13
+	dw 24+32,272    ; 14
+	dw 24+720,192   ; 15
+	dw 24+912,48    ; 16
+
+;------------------------------------------------------------------------------
+
+candy_status
+	ds 32
+
+
+;------------------------------------------------------------------------------
+
+candy_anim
+	db 8
+	db 8
+	db 8
+	db 7
+
+	db 7
+	db 7
+	db 7
+	db 7
+
+	db 6
+	db 6
+	db 6
+	db 5
+
+	db 5
+	db 4
+	db 3
+	db 1
+
+	db 0
+	db 1
+	db 3
+	db 4
+
+	db 5
+	db 5
+	db 6
+	db 6
+
+	db 7
+	db 7
+	db 7
+	db 7
+
+	db 8
+	db 8
+	db 8
+	db 8
+
+;candy_sprites
 
 
 		 
