@@ -317,7 +317,6 @@ VIRQ = $FFFE
 
 ;------------------------------------------------------------------------------
 
-		sei
 		jsr PlayerCandyCollision
 
 ;------------------------------------------------------------------------------
@@ -711,7 +710,7 @@ GameControls
 		lda p1_is_jump			; for the double jump
 		cmp #2
 		bcs :no_jump
-		;inc ;; allow all jump
+		inc ;; allow all jump
 		sta p1_is_jump
 
 		; jump
